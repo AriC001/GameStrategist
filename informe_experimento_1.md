@@ -658,7 +658,7 @@ En particular, el Random Forest optimizado conservó el mayor Recall, pero su Pr
 ---
 
 
-### 11.1 Conclusiones generales
+### 11 Conclusiones generales
 
 El objetivo del experimento fue desarrollar y comparar modelos capaces de predecir si un videojuego de Steam alcanzará la categoría de éxito comercial (`hit`), utilizando características que idealmente estén disponibles antes de su lanzamiento.
 

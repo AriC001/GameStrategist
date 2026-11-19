@@ -1,0 +1,12 @@
+{
+  "modelo": "intfloat/multilingual-e5-base",
+  "prefijo": "passage: ",
+  "max_seq_length": 256,
+  "normalizado": true,
+  "dimension": 768,
+  "filas": 8000,
+  "columna_documentos": "semantic_text",
+  "segundos": 7.0,
+  "dataframe_documentos": "semantic_df",
+  "ids_desde": "semantic_df"
+}
