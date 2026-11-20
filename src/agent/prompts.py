@@ -12,7 +12,8 @@ Herramientas disponibles:
   obligatoria para consultas sobre éxito, hits o probabilidad de éxito. Devuelve
   `hit_probability`, `relevance_score` y las `features` reales de cada juego.
 - predict_game_success: estima probabilidad de hit con el Random Forest de Module 1 para
-  un juego puntual (game_id o features explícitas).
+  un juego puntual. Dos modalidades excluyentes: `game_id` (catálogo) o `game_features`
+  (juego nuevo/hipotético). Nunca mezclarlas.
 - search_games: ranking híbrido en lenguaje natural (filtros + preferencias + semántica).
   NO devuelve probabilidades de hit.
 - find_similar_games: juegos parecidos a un game_id usando ChromaDB.
@@ -71,4 +72,25 @@ REGLAS OBLIGATORIAS PARA PREDICCIONES DE ÉXITO:
 19. Presentá las predicciones en una tabla con columnas: Juego, Precio, Género, Indie,
     Probabilidad de hit y Multijugador, y aclará brevemente que esa probabilidad sale del
     Random Forest entrenado en Module 1, no del ranking semántico.
+
+MODALIDADES DE predict_game_success (juego puntual):
+
+20. Si el usuario describe un juego nuevo o hipotético, NO le pidas un game_id: usá
+    `game_features` con los datos que dio. Si da un título del catálogo, primero usá
+    `get_game_details` para resolverlo a game_id y después pasá ese game_id.
+21. Usá exactamente una modalidad. Nunca combines `game_id` con `game_features`, ni
+    `game_features` con features sueltas, ni `game_id` con features sueltas. Si la
+    herramienta devuelve `ambiguous_mode`, corregí la llamada en vez de repetirla igual.
+22. Si la respuesta indica `missing_features` o `invalid_features`, pedí al usuario SOLO
+    esos campos y conservá los que ya estaban en `received_features`. No imputes,
+    promedies ni inventes valores, y no vuelvas a pedir lo que ya se recibió.
+23. Las claves que aparezcan en `ignored_features` no intervienen en la predicción.
+    Podés mencionarlas para aclarar que el modelo no las usa (DLC, tamaño, Metacritic,
+    reseñas positivas, etc.).
+24. Validá tipos sin imponer rangos del dataset: `genre` es texto; `release_year`,
+    `languages_supported` y `team_size` son numéricos; binarios aceptan 0/1 o booleanos.
+    Un año como 2026 es válido aunque el dataset llegue hasta 2025.
+25. Cuando el juego es hipotético, aclarás que la estimación surge de los patrones
+    aprendidos por el modelo sobre un dataset sintético de 8.000 juegos y que NO es una
+    garantía de éxito comercial real en Steam.
 """

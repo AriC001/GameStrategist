@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 FEATURE_NAMES = (
     "genre",
@@ -20,19 +22,26 @@ FEATURE_NAMES = (
 
 
 class PredictRequest(BaseModel):
-    """Acepta un game_id o las 11 features explícitas (o una mezcla)."""
+    """Una sola modalidad: `game_id`, `game_features` o las 11 features legacy.
 
-    model_config = ConfigDict(extra="forbid")
+    Los tipos se validan en `Predictor` para poder devolver errores estructurados
+    (por ejemplo, un `release_year` futuro como 2026 no debe rechazarse por rango).
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     game_id: str | None = None
-    genre: str | None = None
-    release_year: int | None = None
-    is_indie: int | None = Field(default=None, ge=0, le=1)
-    team_size: int | None = Field(default=None, gt=0)
-    price_usd: float | None = Field(default=None, ge=0)
-    has_multiplayer: int | None = Field(default=None, ge=0, le=1)
-    early_access: int | None = Field(default=None, ge=0, le=1)
-    controller_support: int | None = Field(default=None, ge=0, le=1)
-    languages_supported: int | None = Field(default=None, gt=0)
-    wishlists_k: float | None = Field(default=None, ge=0)
-    trailer_views_k: float | None = Field(default=None, ge=0)
+    game_features: dict[str, Any] | None = None
+
+    # Compatibilidad legacy: se normalizan a game_features, nunca se mezclan.
+    genre: Any = None
+    release_year: Any = None
+    is_indie: Any = None
+    team_size: Any = None
+    price_usd: Any = None
+    has_multiplayer: Any = None
+    early_access: Any = None
+    controller_support: Any = None
+    languages_supported: Any = None
+    wishlists_k: Any = None
+    trailer_views_k: Any = None

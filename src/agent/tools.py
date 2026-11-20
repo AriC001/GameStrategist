@@ -17,19 +17,25 @@ from src.utils import to_builtin
 
 EXCLUDED_DETAIL_FIELDS = {"hit", "revenue_musd"}
 
-_PREDICT_PROPERTIES = {
-    "game_id": {"type": "string", "description": "ID del juego, por ejemplo G00001."},
-    "genre": {"type": "string", "description": "Género principal del juego."},
-    "release_year": {"type": "integer"},
-    "is_indie": {"type": "integer", "enum": [0, 1]},
-    "team_size": {"type": "integer"},
-    "price_usd": {"type": "number"},
-    "has_multiplayer": {"type": "integer", "enum": [0, 1]},
-    "early_access": {"type": "integer", "enum": [0, 1]},
-    "controller_support": {"type": "integer", "enum": [0, 1]},
-    "languages_supported": {"type": "integer"},
-    "wishlists_k": {"type": "number"},
-    "trailer_views_k": {"type": "number"},
+_PREDICT_FEATURE_PROPERTIES = {
+    "genre": {"type": "string", "description": "Género principal del juego (texto)."},
+    "release_year": {
+        "type": "integer",
+        "description": "Año entero. Se aceptan valores fuera del rango del dataset, por ejemplo 2026.",
+    },
+    "is_indie": {"type": "integer", "enum": [0, 1], "description": "0/1 o booleano."},
+    "team_size": {"type": "number", "description": "Numérico > 0."},
+    "price_usd": {"type": "number", "description": "Numérico >= 0."},
+    "has_multiplayer": {"type": "integer", "enum": [0, 1], "description": "0/1 o booleano."},
+    "early_access": {"type": "integer", "enum": [0, 1], "description": "0/1 o booleano."},
+    "controller_support": {
+        "type": "integer",
+        "enum": [0, 1],
+        "description": "0/1 o booleano.",
+    },
+    "languages_supported": {"type": "integer", "description": "Entero > 0."},
+    "wishlists_k": {"type": "number", "description": "Numérico >= 0."},
+    "trailer_views_k": {"type": "number", "description": "Numérico >= 0."},
 }
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -38,13 +44,31 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "predict_game_success",
             "description": (
-                "Estima la probabilidad de que un juego sea hit usando el Random Forest "
-                "persistido de Module 1. Pasá game_id o las 11 features. La clasificación "
-                "usa el threshold original del modelo; el LLM no la calcula."
+                "Estima la probabilidad de hit con el Random Forest persistido de Module 1. "
+                "Usá EXACTAMENTE UNA modalidad: (A) game_id para juegos del catálogo, o "
+                "(B) game_features con las 11 características para juegos nuevos/hipotéticos. "
+                "No mezcles modalidades ni features sueltas. Si faltan datos, la herramienta "
+                "devuelve missing_features: pedí solo esos datos y conservá los recibidos. "
+                "Las features adicionales se ignoran y se informan en ignored_features. "
+                "El threshold es un punto de corte, no un juicio de probabilidad alta."
             ),
             "parameters": {
                 "type": "object",
-                "properties": _PREDICT_PROPERTIES,
+                "properties": {
+                    "game_id": {
+                        "type": "string",
+                        "description": "Modalidad A: ID del juego, por ejemplo G00001.",
+                    },
+                    "game_features": {
+                        "type": "object",
+                        "description": (
+                            "Modalidad B: características del juego nuevo o hipotético. "
+                            "Las claves adicionales se ignoran y se devuelven en ignored_features."
+                        ),
+                        "properties": _PREDICT_FEATURE_PROPERTIES,
+                        "additionalProperties": True,
+                    },
+                },
                 "additionalProperties": False,
             },
         },
