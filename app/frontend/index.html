@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GameStrategist — Asistente estratégico</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #0e1117; color: #e6edf3; }
+    header { padding: 14px 20px; border-bottom: 1px solid #30363d; }
+    header h1 { margin: 0; font-size: 17px; }
+    header p { margin: 4px 0 0; font-size: 12px; color: #8b949e; }
+    #chat { height: calc(100vh - 170px); overflow-y: auto; padding: 18px; }
+    .msg { max-width: 760px; margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; line-height: 1.45; white-space: pre-wrap; }
+    .user { background: #1f6feb33; border: 1px solid #1f6feb66; margin-left: auto; }
+    .assistant { background: #161b22; border: 1px solid #30363d; }
+    .tools { margin-top: 8px; font-size: 11px; color: #8b949e; }
+    .tools code { color: #79c0ff; }
+    form { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid #30363d; }
+    input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; }
+    button { padding: 10px 18px; border-radius: 8px; border: 1px solid #238636; background: #238636; color: white; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; }
+    .hint { padding: 0 18px 10px; font-size: 11px; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GameStrategist</h1>
+    <p>Predicción (Module 1) + búsqueda semántica (Module 2) orquestadas por un LLM local.</p>
+  </header>
+
+  <div id="chat"></div>
+
+  <div class="hint">Ejemplo: <em>buscá juegos indie baratos con buenas valoraciones</em> o <em>predecí el éxito de G00001</em>.</div>
+  <form id="form">
+    <input id="input" autocomplete="off" placeholder="Escribí tu consulta…" autofocus>
+    <button id="send" type="submit">Enviar</button>
+  </form>
+
+  <script>
+    const chat = document.getElementById('chat');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const history = [];
+
+    function addMessage(role, text, tools) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + (role === 'user' ? 'user' : 'assistant');
+      div.textContent = text;
+      if (tools && tools.length) {
+        const meta = document.createElement('div');
+        meta.className = 'tools';
+        meta.textContent = 'Herramientas: ' + tools.map(t => t.name + ' (' + t.status + ')').join(', ');
+        div.appendChild(meta);
+      }
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const message = input.value.trim();
+      if (!message) return;
+
+      input.value = '';
+      send.disabled = true;
+      addMessage('user', message);
+
+      try {
+        const response = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, history })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Error del servidor');
+
+        addMessage('assistant', data.answer || '(sin respuesta)', data.tool_calls);
+        history.push({ role: 'user', content: message });
+        history.push({ role: 'assistant', content: data.answer || '' });
+      } catch (error) {
+        addMessage('assistant', 'No pude completar la consulta: ' + error.message);
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
