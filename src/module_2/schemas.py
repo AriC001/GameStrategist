@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,6 +38,23 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(default=10, ge=1, le=50)
     game_id_referencia: str | None = None
+
+
+class HitCandidatesRequest(BaseModel):
+    """Búsqueda de candidatos con predicción de hit del lado del backend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    top_k: int = Field(default=10, ge=1, le=20)
+    order_by: Literal[
+        "hit_probability",
+        "relevance",
+        "price_asc_then_probability",
+        "price_desc_then_probability",
+    ] = "hit_probability"
+    min_probability: float | None = Field(default=None, ge=0.0, le=1.0)
+    only_above_threshold: bool = False
 
 
 class SimilarRequest(BaseModel):

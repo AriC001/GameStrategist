@@ -24,9 +24,15 @@ class UnslothClient:
         api_key: str | None = None,
         timeout: float = 120.0,
     ) -> None:
-        self.base_url = (base_url or os.getenv("UNSLOTH_BASE_URL", "")).rstrip("/")
+        raw_url = (base_url or os.getenv("UNSLOTH_BASE_URL", "")).rstrip("/")
+        # Aceptar tanto .../v1 como .../v1/chat/completions evita duplicar el sufijo.
+        self.base_url = raw_url.removesuffix("/chat/completions")
         self.model = model or os.getenv("UNSLOTH_MODEL", "")
-        self.api_key = api_key or os.getenv("UNSLOTH_API_KEY", "")
+        self.api_key = (
+            api_key
+            or os.getenv("UNSLOTH_API_KEY", "")
+            or os.getenv("API_TOKEN", "")
+        )
         self.timeout = timeout
 
     def chat(
@@ -62,7 +68,10 @@ class UnslothClient:
                 json=payload,
                 headers=headers,
             )
-            response.raise_for_status()
+            if response.is_error:
+                raise RuntimeError(
+                    f"LLM {response.status_code}: {response.text[:500]}"
+                )
             data = response.json()
 
         message = data["choices"][0]["message"]
@@ -78,6 +87,7 @@ class UnslothClient:
             "base_url": self.base_url or None,
             "model": self.model or None,
             "configured": bool(self.base_url and self.model),
+            "api_key_configured": bool(self.api_key),
         }
 
 

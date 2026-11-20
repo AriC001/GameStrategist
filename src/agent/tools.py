@@ -8,6 +8,7 @@ from src.module_1.predictor import Predictor
 from src.module_2.schemas import (
     CompareRequest,
     DetailsRequest,
+    HitCandidatesRequest,
     SearchRequest,
     SimilarRequest,
 )
@@ -64,6 +65,65 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "game_id_referencia": {
                         "type": "string",
                         "description": "Opcional; ID de referencia para similitud.",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_hit_candidates",
+            "description": (
+                "Operación compuesta: ejecuta search_games con los criterios de la consulta "
+                "y aplica el Random Forest de Module 1 a todos los candidatos en un solo "
+                "lote. Devuelve la probabilidad de hit real de cada juego, el threshold y, "
+                "por separado, el score de relevancia del buscador. La respuesta incluye "
+                "`views` con el mismo pool ordenado por probabilidad y por precio: usalas "
+                "cuando el usuario pida varias listas, sin repetir la búsqueda. Usala siempre que el "
+                "usuario pida juegos con potencial de éxito, hits o probabilidad de éxito: "
+                "reemplaza llamar a search_games y luego a predict_game_success varias veces."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Criterios de búsqueda del usuario. No hace falta quitar "
+                            "palabras como 'hit' o 'éxito'."
+                        ),
+                    },
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
+                    "order_by": {
+                        "type": "string",
+                        "enum": [
+                            "hit_probability",
+                            "relevance",
+                            "price_asc_then_probability",
+                            "price_desc_then_probability",
+                        ],
+                        "default": "hit_probability",
+                        "description": (
+                            "Criterio de orden de la tabla. 'relevance' usa el ranking del "
+                            "buscador; 'hit_probability' usa Module 1. Los valores "
+                            "'price_asc_then_probability' y 'price_desc_then_probability' "
+                            "ordenan primero por precio y desempatan por probabilidad. "
+                            "Usalos cuando el usuario priorice precio; no reordienes vos."
+                        ),
+                    },
+                    "min_probability": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Corte opcional de probabilidad; por defecto no filtra.",
+                    },
+                    "only_above_threshold": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Si es true, conserva solo juegos con is_hit=true.",
                     },
                 },
                 "required": ["query"],
@@ -146,6 +206,7 @@ class ToolRegistry:
         self._handlers: dict[str, Callable[[dict], dict]] = {
             "predict_game_success": self.predict_game_success,
             "search_games": self.search_games,
+            "search_hit_candidates": self.search_hit_candidates,
             "find_similar_games": self.find_similar_games,
             "get_game_details": self.get_game_details,
             "compare_games": self.compare_games,
@@ -170,6 +231,143 @@ class ToolRegistry:
             top_k=request.top_k,
             game_id_referencia=request.game_id_referencia,
         )
+
+    def search_hit_candidates(self, arguments: dict) -> dict:
+        """Busca candidatos y predice hit en backend; el LLM solo redacta."""
+        request = HitCandidatesRequest.model_validate(arguments)
+        # Si manda precio, ampliamos el pool antes de ordenar: si no, un juego barato
+        # con alta probabilidad puede quedar fuera por no estar en el top-k original.
+        fetch_k = (
+            min(50, request.top_k * 3)
+            if request.order_by.startswith("price_")
+            else request.top_k
+        )
+        busqueda = self.search_games({"query": request.query, "top_k": fetch_k})
+        if busqueda.get("status") != "ok":
+            # ambiguo o error: no hay una lista de candidatos sobre la que predecir
+            return busqueda
+
+        candidatos = busqueda.get("results") or []
+        ids = [item["game_id"] for item in candidatos if item.get("game_id")]
+        predicciones = self._predictor.predict_many(ids)["results"]
+        por_id = {pred["game_id"]: pred for pred in predicciones}
+
+        resultados = []
+        for candidato in candidatos:
+            gid = candidato.get("game_id")
+            prediccion = por_id.get(gid)
+            item = {
+                "game_id": gid,
+                "title": candidato.get("title"),
+                "genre": candidato.get("genre"),
+                "price_usd": candidato.get("price_usd"),
+                "is_indie": candidato.get("is_indie"),
+                "has_multiplayer": candidato.get("has_multiplayer"),
+                "early_access": candidato.get("early_access"),
+                "relevance_score": candidato.get("score"),
+                "semantic_similarity": candidato.get("sim"),
+                "por_que": candidato.get("por_que"),
+            }
+            if prediccion and prediccion.get("status") == "ok":
+                item["hit_probability"] = prediccion["probability"]
+                item["threshold"] = prediccion["threshold"]
+                item["is_hit"] = prediccion["is_hit"]
+                item["label"] = prediccion["label"]
+                item["prediction_source"] = prediccion["model"]
+                item["features_used"] = prediccion["features_used"]
+                features = prediccion.get("features") or {}
+                item["features"] = features
+                # Las features reales son la fuente autorizada para describir el juego.
+                item["has_multiplayer"] = features.get("has_multiplayer")
+                item["early_access"] = features.get("early_access")
+                item["is_indie"] = features.get("is_indie")
+            else:
+                item["hit_probability"] = None
+                item["prediction_status"] = "error"
+                item["prediction_error"] = (prediccion or {}).get(
+                    "error", "predicción no disponible"
+                )
+
+            if request.min_probability is not None and (
+                item["hit_probability"] is None
+                or item["hit_probability"] < request.min_probability
+            ):
+                continue
+            if request.only_above_threshold and item.get("is_hit") is not True:
+                continue
+            resultados.append(item)
+
+        ordenados = self._ordenar_resultados(resultados, request.order_by)
+        resultados = ordenados[: request.top_k]
+
+        return {
+            "status": "ok",
+            "query": request.query,
+            "strategy": busqueda.get("strategy"),
+            "n_candidates": busqueda.get("n_candidates"),
+            "order_by": request.order_by,
+            "filters": {
+                "min_probability": request.min_probability,
+                "only_above_threshold": request.only_above_threshold,
+            },
+            "threshold": self._predictor.threshold,
+            "top_k": request.top_k,
+            "pool_size": len(ordenados),
+            "results": resultados,
+            "views": {
+                "by_hit_probability": self._ordenar_resultados(
+                    resultados, "hit_probability"
+                ),
+                "by_price_then_probability": self._ordenar_resultados(
+                    resultados, "price_asc_then_probability"
+                ),
+            },
+            "advertencias": busqueda.get("advertencias", []),
+            "excluded_fields": sorted(EXCLUDED_DETAIL_FIELDS),
+            "criterion": (
+                "is_hit = hit_probability >= threshold. El threshold es un corte de "
+                "clasificación validado en Module 1, no un umbral de 'probabilidad alta'."
+            ),
+            "note": (
+                "hit_probability proviene del Random Forest (Module 1) con features reales "
+                "del dataset. relevance_score y semantic_similarity provienen del buscador "
+                "(Module 2) y no son probabilidades."
+            ),
+        }
+
+    @staticmethod
+    def _ordenar_resultados(resultados: list[dict], order_by: str) -> list[dict]:
+        """Ordena una copia; en empates de precio manda hit_probability."""
+        items = list(resultados)
+        if order_by == "hit_probability":
+            items.sort(
+                key=lambda item: (
+                    item["hit_probability"] is not None,
+                    item["hit_probability"]
+                    if item["hit_probability"] is not None
+                    else -1.0,
+                ),
+                reverse=True,
+            )
+        elif order_by == "relevance":
+            items.sort(key=lambda item: item["relevance_score"] or -1.0, reverse=True)
+        else:  # price_asc_then_probability / price_desc_then_probability
+            ascendente = order_by == "price_asc_then_probability"
+            items.sort(
+                key=lambda item: (
+                    item["hit_probability"]
+                    if item["hit_probability"] is not None
+                    else -1.0
+                ),
+                reverse=True,
+            )
+            items.sort(
+                key=lambda item: (
+                    item["price_usd"] if item["price_usd"] is not None else float("inf")
+                ),
+                reverse=not ascendente,
+            )
+        return items
 
     def find_similar_games(self, arguments: dict) -> dict:
         request = SimilarRequest.model_validate(arguments)
